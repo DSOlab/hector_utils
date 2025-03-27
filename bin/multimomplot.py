@@ -93,6 +93,16 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-r",
+    "--raw-dir",
+    metavar="RAW_DIR",
+    dest="raw_dir",
+    default=None,
+    required=False,
+    help="If set, then the folder specified here will be searched for corresponding .mom files, which will be used to load outlier data points.",
+)
+
+parser.add_argument(
     "--no-breaks",
     action="store_true",
     dest="no_breaks",
@@ -278,8 +288,10 @@ class HectorTsModel:
 
 
 class HectorTsComponent:
-    def __init__(self, t: list, x: list, mx: list, breaks: list, offsets: list):
+    def __init__(self, t: list, x: list, mx: list, breaks: list, offsets: list, to: list = [], xo: list = []):
         self.t, self.x, self.mx, self.breaks, self.offsets = t, x, mx, breaks, offsets
+        self.to = to
+        self.xo = xo
 
     def lowerBound(self, t):
         if self.t[0] >= t:
@@ -290,6 +302,21 @@ class HectorTsComponent:
             if tj >= t:
                 return j
         raise RuntimeError("Something went wrong in HectorTsComponent::lowerBound()")
+
+    def filterOutliersFromMom(self, args):
+        sto = []; sxo = [];
+        for j, tj in enumerate(args[0]):
+            if j > 1: assert(args[0][j] > args[0][j-1])
+            if tj not in self.t:
+                sto.append(tj)
+                sxo.append(args[1][j])
+                if len(self.to)>1: assert(sto[-1] > sto[-2])
+        self.to = sto
+        self.xo = sxo
+        return
+        
+    def appendOutliers(self, fn: str):
+        self.filterOutliersFromMom(feedComponent(fn))
 
     @classmethod
     def fromMom(self, fn: str):
@@ -309,6 +336,12 @@ class HectorTsComponent:
     def filterOffsets(self, tmin, tmax):
         return [b for b in self.offsets if (b >= tmin and b < tmax)]
 
+    def filterOutliers(self, tmin, tmax):
+        for i, t in enumerate(self.to[1:]): assert(t>self.to[i])
+        outliers = [ (o[0],o[1]) for o in zip(self.to, self.xo) if o[0]>=tmin and o[0]<tmax ]
+        # print(f"Here are the (remaining) outliers: {outliers}")
+        return [o[0] for o in outliers], [o[1] for o in outliers]
+
     def filter(self, tmin=datetime.min, tmax=datetime.max):
         self.assertSorted()
         t0_idx = self.lowerBound(tmin) if tmin is not datetime.min else 0
@@ -321,6 +354,7 @@ class HectorTsComponent:
             self.mx[t0_idx:t1_idx] if (self.mx != []) else [],
             self.filterBreaks(tmin, tmax),
             self.filterOffsets(tmin, tmax),
+            *self.filterOutliers(tmin, tmax)
         )
 
     def tLimits(self):
@@ -346,6 +380,11 @@ class HectorTs:
             HectorTsComponent.fromMom(join(data_dir, site + "_1.mom")),
             HectorTsComponent.fromMom(join(data_dir, site + "_2.mom")),
         )
+
+    def appendOutliers(self, data_dir):
+        self.north.appendOutliers(join(data_dir, self.site + "_0.mom"))
+        self.east.appendOutliers(join(data_dir, self.site + "_1.mom"))
+        self.up.appendOutliers(join(data_dir, self.site + "_2.mom"))
 
     def breaks(self):
         return self.north.breaks, self.east.breaks, self.up.breaks
@@ -529,6 +568,8 @@ if __name__ == "__main__":
     mts = []
     for sta in args.station:
         ts.append(HectorTs.fromMom(sta, args.data_dir))
+        if args.raw_dir:
+            ts[-1].appendOutliers(args.raw_dir)
         if args.plot_model:
             mts.append(HectorTsModel.fromMom(sta, args.data_dir, *ts[-1].breaks()))
             mts[-1].setStartEpoch(ts[-1].startEpoch())
@@ -573,6 +614,32 @@ if __name__ == "__main__":
         )
         color_rgba = sci.get_facecolors()[0]  # this is an RGBA array
         colors_used.append(color_rgba)
+    
+    # add scatter plots / outliers
+    for idx, sta in enumerate(ts):
+        ts2 = sta.filter(tmin, tmax)
+        # outliers
+        ax[0].scatter(
+            ts2.north.to,
+            ts2.north.xo,
+            color=adjustColor(colors_used[idx], 2.5),
+            s=plotOptions["markerSize"]["value"],
+            alpha=.6, marker='x'
+        )
+        ax[1].scatter(
+            ts2.east.to,
+            ts2.east.xo,
+            color=adjustColor(colors_used[idx], 2.5),
+            s=plotOptions["markerSize"]["value"],
+            alpha=.6, marker='x'
+        )
+        ax[2].scatter(
+            ts2.up.to,
+            ts2.up.xo,
+            color=adjustColor(colors_used[idx], 2.5),
+            s=plotOptions["markerSize"]["value"],
+            alpha=.6, marker='x'
+        )
 
     # add model line(s)
     if args.plot_model:
@@ -616,44 +683,6 @@ if __name__ == "__main__":
                             fontsize=plotOptions["velocityFontSize"]["value"],
                             alpha=1,
                         )
-            # north
-            #ntrends = msta.north.trends
-            #for trend in ntrends:
-            #    if trend["to"] >= tmin:
-            #        x0pos = trend["from"] if trend["from"] >= tmin else tmin
-            #        ax[0].text(
-            #            msta.north.at(x0pos),
-            #            x0pos,
-            #            f"v={trend['value']}mm/a",
-            #            color=adjustColor(colors_used[idx], 0.8),
-            #            fontsize=plotOptions["velocityFontSize"]["value"],
-            #            alpha=1,
-            #        )
-            ## east
-            #etrends = msta.east.trends
-            #for trend in etrends:
-            #    if trend["to"] >= tmin:
-            #        ax[1].text(
-            #            trend["from"] if trend["from"] >= tmin else tmin,
-            #            msta.east.at(trend["from"]),
-            #            f"v={trend['value']}mm/a",
-            #            color=adjustColor(colors_used[idx], 0.8),
-            #            fontsize=plotOptions["velocityFontSize"]["value"],
-            #            alpha=1,
-            #        )
-            ## up
-            #utrends = msta.up.trends
-            #for trend in utrends:
-            #    if trend["to"] >= tmin:
-            #        ax[2].text(
-            #            trend["from"] if trend["from"] >= tmin else tmin,
-            #            msta.up.at(trend["from"]),
-            #            f"v={trend['value']}mm/a",
-            #            color=adjustColor(colors_used[idx], 0.8),
-            #            fontsize=plotOptions["velocityFontSize"]["value"],
-            #            alpha=1,
-            #        )
-
     # add breaks and jumps
     def filterBreaks(ts_list, tmin, tmax, comp):
         # print(f"filtering breaks with list of ts: {[l.site for l in ts_list]}")
