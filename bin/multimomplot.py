@@ -242,6 +242,12 @@ class HectorTsModel:
     def __init__(self, site, northc, eastc, upc):
         self.site = site
         self.north, self.east, self.up = northc, eastc, upc
+    
+    def __getitem__(self, key):
+        # Allow dictionary-like access to components
+        if key in ("north", "east", "up"):
+            return getattr(self, key)
+        raise KeyError(f"{key} not found in HectorTsModel")
 
     def setStartEpoch(self, t0):
         self.north.setStartEpoch(t0)
@@ -571,7 +577,7 @@ if __name__ == "__main__":
     # add model line(s)
     if args.plot_model:
         for idx, msta in enumerate(mts):
-            tmn, tmx = ts[idx].tLimits()
+            tmn, tmx = ts[idx].filter(tmin, tmax).tLimits()
             mt, mv = msta.values("north", tmn, tmx)
             ax[0].plot(
                 mt,
@@ -597,42 +603,56 @@ if __name__ == "__main__":
     if args.plot_velocity_text:
         # add velocities estimates (text)
         for idx, msta in enumerate(mts):
+            for cidx, c in enumerate(["north", "east", "up"]):
+                trends = msta[c].trends
+                for trend in trends:
+                    if trend["to"] >= tmin and trend["from"] < tmax:
+                        x0pos = trend["from"] if trend["from"] >= tmin else tmin
+                        ax[cidx].text(
+                            x0pos,
+                            msta[c].at(x0pos),
+                            f"v={trend['value']:.1f}mm/a",
+                            color=adjustColor(colors_used[idx], 0.8),
+                            fontsize=plotOptions["velocityFontSize"]["value"],
+                            alpha=1,
+                        )
             # north
-            ntrends = msta.north.trends
-            for trend in ntrends:
-                if trend["to"] >= tmin:
-                    ax[0].text(
-                        trend["from"] if trend["from"] >= tmin else tmin,
-                        msta.north.at(trend["from"]),
-                        f"v={trend['value']}mm/a",
-                        color=adjustColor(colors_used[idx], 0.8),
-                        fontsize=plotOptions["velocityFontSize"]["value"],
-                        alpha=1,
-                    )
-            # east
-            etrends = msta.east.trends
-            for trend in etrends:
-                if trend["to"] >= tmin:
-                    ax[1].text(
-                        trend["from"] if trend["from"] >= tmin else tmin,
-                        msta.east.at(trend["from"]),
-                        f"v={trend['value']}mm/a",
-                        color=adjustColor(colors_used[idx], 0.8),
-                        fontsize=plotOptions["velocityFontSize"]["value"],
-                        alpha=1,
-                    )
-            # up
-            utrends = msta.up.trends
-            for trend in utrends:
-                if trend["to"] >= tmin:
-                    ax[2].text(
-                        trend["from"] if trend["from"] >= tmin else tmin,
-                        msta.up.at(trend["from"]),
-                        f"v={trend['value']}mm/a",
-                        color=adjustColor(colors_used[idx], 0.8),
-                        fontsize=plotOptions["velocityFontSize"]["value"],
-                        alpha=1,
-                    )
+            #ntrends = msta.north.trends
+            #for trend in ntrends:
+            #    if trend["to"] >= tmin:
+            #        x0pos = trend["from"] if trend["from"] >= tmin else tmin
+            #        ax[0].text(
+            #            msta.north.at(x0pos),
+            #            x0pos,
+            #            f"v={trend['value']}mm/a",
+            #            color=adjustColor(colors_used[idx], 0.8),
+            #            fontsize=plotOptions["velocityFontSize"]["value"],
+            #            alpha=1,
+            #        )
+            ## east
+            #etrends = msta.east.trends
+            #for trend in etrends:
+            #    if trend["to"] >= tmin:
+            #        ax[1].text(
+            #            trend["from"] if trend["from"] >= tmin else tmin,
+            #            msta.east.at(trend["from"]),
+            #            f"v={trend['value']}mm/a",
+            #            color=adjustColor(colors_used[idx], 0.8),
+            #            fontsize=plotOptions["velocityFontSize"]["value"],
+            #            alpha=1,
+            #        )
+            ## up
+            #utrends = msta.up.trends
+            #for trend in utrends:
+            #    if trend["to"] >= tmin:
+            #        ax[2].text(
+            #            trend["from"] if trend["from"] >= tmin else tmin,
+            #            msta.up.at(trend["from"]),
+            #            f"v={trend['value']}mm/a",
+            #            color=adjustColor(colors_used[idx], 0.8),
+            #            fontsize=plotOptions["velocityFontSize"]["value"],
+            #            alpha=1,
+            #        )
 
     # add breaks and jumps
     def filterBreaks(ts_list, tmin, tmax, comp):
