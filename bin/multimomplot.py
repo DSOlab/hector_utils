@@ -107,6 +107,20 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--add-vel-estimates",
+    action="store_true",
+    dest="plot_velocity_text",
+    help="Add velocity estimates to the plot(s).",
+)
+
+parser.add_argument(
+    "--no-breaks-text",
+    action="store_true",
+    dest="no_breaks_text",
+    help="Do not add explanatory text along break lines.",
+)
+
+parser.add_argument(
     "-c",
     "--default-config",
     action="store_true",
@@ -312,6 +326,12 @@ class HectorTs:
         self.site = site
         self.north, self.east, self.up = northc, eastc, upc
 
+    def __getitem__(self, key):
+        # Allow dictionary-like access to components
+        if key in ("north", "east", "up"):
+            return getattr(self, key)
+        raise KeyError(f"{key} not found in HectorTs")
+
     @classmethod
     def fromMom(self, site, data_dir):
         return HectorTs(
@@ -360,6 +380,24 @@ plotOptions = {
         "var": float,
         "help": "Marker size for scatter plot(s).",
     },
+    "markerTransparency": {
+        "value": 0.3,
+        "type": "po",
+        "var": float,
+        "help": "Marker opacity for scatter plot(s).",
+    },
+    "velocityFontSize": {
+        "value": 8,
+        "type": "po",
+        "var": int,
+        "help": "Font size for velocity text.",
+    },
+    "breaksFontSize": {
+        "value": 9,
+        "type": "po",
+        "var": int,
+        "help": "Font size for explanatory breaks text (along vertical).",
+    },
     "everyYears": {
         "value": 1,
         "type": "po",
@@ -404,7 +442,7 @@ plotOptions = {
         "help": "Marker size size for legend.",
     },
     "modelLineWidth": {
-        "value": 0.6,
+        "value": 0.8,
         "type": "po",
         "var": float,
         "help": "Line width for plotting model line(s).",
@@ -441,6 +479,25 @@ def spitConfig():
     for k, v in plotOptions.items():
         print("# {:}".format(v["help"]))
         print("{:} {}".format(k, v["value"]))
+
+
+def adjustColor(rgba_color, factor=0.6):
+    """
+    Darken or lighten an RGBA color.
+
+    Parameters:
+        rgba_color (tuple): RGBA color tuple (each value in 0-1).
+        factor (float):
+            < 1 to darken (e.g., 0.6),
+            > 1 to lighten (e.g., 1.4).
+
+    Returns:
+        tuple: Adjusted RGBA color.
+    """
+    r, g, b, a = rgba_color[:4]
+    # Ensure the RGB values stay within [0,1] after scaling
+    new_rgb = [min(max(c * factor, 0), 1) for c in (r, g, b)]
+    return (*new_rgb, a)
 
 
 if __name__ == "__main__":
@@ -486,42 +543,119 @@ if __name__ == "__main__":
     fig.subplots_adjust(wspace=0, hspace=0)
 
     # add scatter plots / data points
-    sc = []
+    colors_used = []
     for sta in ts:
         ts2 = sta.filter(tmin, tmax)
-        ax[0].scatter(ts2.north.t, ts2.north.x, s=plotOptions["markerSize"]["value"])
-        ax[1].scatter(ts2.east.t, ts2.east.x, s=plotOptions["markerSize"]["value"])
-        sci = ax[2].scatter(
-            ts2.up.t, ts2.up.x, s=plotOptions["markerSize"]["value"], label=ts2.site
+        ax[0].scatter(
+            ts2.north.t,
+            ts2.north.x,
+            s=plotOptions["markerSize"]["value"],
+            alpha=plotOptions["markerTransparency"]["value"],
         )
-        sc.append(sci)
+        ax[1].scatter(
+            ts2.east.t,
+            ts2.east.x,
+            s=plotOptions["markerSize"]["value"],
+            alpha=plotOptions["markerTransparency"]["value"],
+        )
+        sci = ax[2].scatter(
+            ts2.up.t,
+            ts2.up.x,
+            s=plotOptions["markerSize"]["value"],
+            alpha=plotOptions["markerTransparency"]["value"],
+            label=ts2.site,
+        )
+        color_rgba = sci.get_facecolors()[0]  # this is an RGBA array
+        colors_used.append(color_rgba)
 
     # add model line(s)
     if args.plot_model:
         for idx, msta in enumerate(mts):
-            mt, mv = msta.values("north", tmin, tmax)
+            tmn, tmx = ts[idx].tLimits()
+            mt, mv = msta.values("north", tmn, tmx)
             ax[0].plot(
                 mt,
                 mv,
-                # c=sc[idx].get_facecolor(),
+                c=adjustColor(colors_used[idx], 0.6),
                 linewidth=plotOptions["modelLineWidth"]["value"],
             )
-            _, mv = msta.values("east", tmin, tmax)
+            _, mv = msta.values("east", tmn, tmx)
             ax[1].plot(
                 mt,
                 mv,
-                # c=sc.to_rgba(sc[idx]),
+                c=adjustColor(colors_used[idx], 0.6),
                 linewidth=plotOptions["modelLineWidth"]["value"],
             )
-            _, mv = msta.values("up", tmin, tmax)
+            _, mv = msta.values("up", tmn, tmx)
             ax[2].plot(
                 mt,
                 mv,
-                # c=sc.to_rgba(sc[idx]),
+                c=adjustColor(colors_used[idx], 0.6),
                 linewidth=plotOptions["modelLineWidth"]["value"],
             )
 
+    if args.plot_velocity_text:
+        # add velocities estimates (text)
+        for idx, msta in enumerate(mts):
+            # north
+            ntrends = msta.north.trends
+            for trend in ntrends:
+                if trend["to"] >= tmin:
+                    ax[0].text(
+                        trend["from"] if trend["from"] >= tmin else tmin,
+                        msta.north.at(trend["from"]),
+                        f"v={trend['value']}mm/a",
+                        color=adjustColor(colors_used[idx], 0.8),
+                        fontsize=plotOptions["velocityFontSize"]["value"],
+                        alpha=1,
+                    )
+            # east
+            etrends = msta.east.trends
+            for trend in etrends:
+                if trend["to"] >= tmin:
+                    ax[1].text(
+                        trend["from"] if trend["from"] >= tmin else tmin,
+                        msta.east.at(trend["from"]),
+                        f"v={trend['value']}mm/a",
+                        color=adjustColor(colors_used[idx], 0.8),
+                        fontsize=plotOptions["velocityFontSize"]["value"],
+                        alpha=1,
+                    )
+            # up
+            utrends = msta.up.trends
+            for trend in utrends:
+                if trend["to"] >= tmin:
+                    ax[2].text(
+                        trend["from"] if trend["from"] >= tmin else tmin,
+                        msta.up.at(trend["from"]),
+                        f"v={trend['value']}mm/a",
+                        color=adjustColor(colors_used[idx], 0.8),
+                        fontsize=plotOptions["velocityFontSize"]["value"],
+                        alpha=1,
+                    )
+
     # add breaks and jumps
+    def filterBreaks(ts_list, tmin, tmax, comp):
+        # print(f"filtering breaks with list of ts: {[l.site for l in ts_list]}")
+        added_breaks = []
+        break_texts = []
+        for ts in ts_list:
+            ts2 = ts.filter(tmin, tmax)
+            # print(f"filtering breaks for {ts2.site}")
+            for brk in ts2[comp].breaks:
+                if brk not in added_breaks:
+                    added_breaks.append(brk)
+                    break_texts.append(f"{ts2.site}@{brk.strftime("%j.%y")}")
+                    # print(f"\tadded break text: {break_texts[-1]}")
+                else:
+                    break_texts[added_breaks.index(brk)] = (
+                        f"{ts2.site}," + break_texts[added_breaks.index(brk)]
+                    )
+                    # print(
+                    #    f"\tchanged break text: {break_texts[added_breaks.index(brk)]}"
+                    # )
+        return added_breaks, break_texts
+
     if not args.no_breaks:
         for sta in ts:
             ts2 = sta.filter(tmin, tmax)
@@ -531,6 +665,21 @@ if __name__ == "__main__":
                 ax[1].axvline(brk, linestyle="-.", color="k", lw=0.2)
             for brk in ts2.up.breaks:
                 ax[2].axvline(brk, linestyle="-.", color="k", lw=0.2)
+        if not args.no_breaks_text:
+            for idx, c in enumerate(["north", "east", "up"]):
+                breaks, texts = filterBreaks(ts, tmin, tmax, c)
+                for ij in zip(breaks, texts):
+                    ax[idx].text(
+                        ij[0],
+                        0.5,
+                        ij[1],
+                        rotation=90,
+                        color="black",
+                        fontsize=plotOptions["breaksFontSize"]["value"],
+                        verticalalignment="center",
+                        horizontalalignment="right",
+                        transform=ax[idx].get_xaxis_transform(),
+                    )
 
     if len(ts) > 1:
         lgnd = ax[2].legend(
