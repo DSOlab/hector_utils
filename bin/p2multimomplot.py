@@ -420,13 +420,13 @@ class HectorTs:
 # PlotOptions:
 plotOptions = {
     "markerSize": {
-        "value": 5,
+        "value": 1,
         "type": "po",
         "var": float,
         "help": "Marker size for scatter plot(s).",
     },
     "markerTransparency": {
-        "value": 0.8,
+        "value": 0.3,
         "type": "po",
         "var": float,
         "help": "Marker opacity for scatter plot(s).",
@@ -456,13 +456,13 @@ plotOptions = {
         "help": "Minor ticks will be plotted every 'everyMonths' months.",
     },
     "xTitleSize": {
-        "value": 14,
+        "value": 10,
         "type": "po",
         "var": int,
         "help": "Label font size for x-axis.",
     },
     "yTitleSize": {
-        "value": 12,
+        "value": 9,
         "type": "po",
         "var": int,
         "help": "Label font size for y-axis.",
@@ -542,6 +542,7 @@ def adjustColor(rgba_color, factor=0.6):
     r, g, b, a = rgba_color[:4]
     # Ensure the RGB values stay within [0,1] after scaling
     new_rgb = [min(max(c * factor, 0), 1) for c in (r, g, b)]
+    print(f"original rgba: {rgba_color} became {new_rgb, a}")
     return (*new_rgb, a)
 
 
@@ -584,7 +585,8 @@ if __name__ == "__main__":
     if args.style_sheet is not None:
         plt.style.use(args.style_sheet)
 
-    fig, ax = plt.subplots(3, 1, sharex=True)
+    # fig, ax = plt.subplots(3, 1, sharex=True)
+    fig, ax = plt.subplots(3,1,sharex=True, figsize=(4.135, 3.897))
 
     # remove space between subplots
     fig.subplots_adjust(wspace=0, hspace=0)
@@ -675,12 +677,16 @@ if __name__ == "__main__":
                 for trend in trends:
                     if trend["to"] >= tmin and trend["from"] < tmax:
                         x0pos = trend["from"] if trend["from"] >= tmin else tmin
+                        ofst = 0
+                        if ts[idx].site == 'sntj' and c == 'east':
+                            x0pos = datetime(2024, 4, 1)
+                            ofst = 10
                         ax[cidx].text(
                             x0pos,
-                            msta[c].at(x0pos),
+                            msta[c].at(x0pos)+ofst,
                             f"v={trend['value']:.1f}mm/a",
-                            color=adjustColor(colors_used[idx], 0.8),
-                            fontsize=plotOptions["velocityFontSize"]["value"],
+                            color=adjustColor(colors_used[idx], 0.5),
+                            fontsize=6,
                             alpha=1,
                         )
     # add breaks and jumps
@@ -732,19 +738,23 @@ if __name__ == "__main__":
 
     if len(ts) > 1:
         lgnd = ax[2].legend(
-            loc=plotOptions["legendPosition"]["value"],
-            fontsize=plotOptions["legendFontSize"]["value"],
+            # loc=plotOptions["legendPosition"]["value"],
+            # fontsize=plotOptions["legendFontSize"]["value"],
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.25),  # Adjust vertical offset as needed
+            ncol=4,
+            frameon=False
         )
         for handle in lgnd.legendHandles:
-            handle.set_sizes([plotOptions["legendMarkerSize"]["value"]])
+            handle.set_sizes([5,5,5,5])
 
-    ax[2].set_xlabel(
-        "Time",
-        {
-            "fontweight": "normal",
-            "fontsize": plotOptions["xTitleSize"]["value"],
-        },
-    )
+    #ax[2].set_xlabel(
+    #    "Date",
+    #    {
+    #        "fontweight": "normal",
+    #        "fontsize": plotOptions["xTitleSize"]["value"],
+    #    },
+    #)
     ax[0].set_ylabel(
         "North [mm]",
         {
@@ -767,29 +777,32 @@ if __name__ == "__main__":
         },
     )
 
-    ax[0].set_title(
-        "{:} Time Series".format(" ".join(args.station)),
-        {
-            "fontweight": "heavy",
-            "fontsize": plotOptions["titleSize"]["value"],
-        },
+    #ax[0].set_title(
+    #    "{:} Time Series".format(" ".join(args.station)),
+    #    {
+    #        "fontweight": "heavy",
+    #        "fontsize": plotOptions["titleSize"]["value"],
+    #    },
+    #)
+
+    # Major formatter/locator (every year)
+    ax[0].xaxis.set_major_locator(
+        # mdates.YearLocator(plotOptions["everyYears"]["value"], month=1, day=1)
+        mdates.MonthLocator(interval=2)
+    )
+    ax[0].xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    # Minor formatter/locator (every n months)
+    ax[0].xaxis.set_minor_locator(
+        # mdates.MonthLocator(range(1, 13, plotOptions["everyMonths"]["value"]), 1)
+        # mdates.MonthLocator(bymonthday=15)
+        mdates.MonthLocator(bymonthday=[1, 15])
     )
 
-#    # Major formatter/locator (every year)
-#    ax[0].xaxis.set_major_locator(
-#        mdates.YearLocator(plotOptions["everyYears"]["value"], month=1, day=1)
-#    )
-#    ax[0].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-#    # Minor formatter/locator (every n months)
-#    ax[0].xaxis.set_minor_locator(
-#        mdates.MonthLocator(range(1, 13, plotOptions["everyMonths"]["value"]), 1)
-#    )
-    # Locator: every 3 days
-    ax[0].xaxis.set_major_locator(mdates.DayLocator(interval=5))
-
-    # Formatter: e.g., show Day-Month
-    ax[0].xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
-
+    ax[0].tick_params(axis='both', which='major', labelsize=6)
+    ax[1].tick_params(axis='both', which='major', labelsize=6)
+    ax[2].tick_params(axis='both', which='major', labelsize=6)
 
     fig.autofmt_xdate()
-    plt.show()
+    plt.subplots_adjust(bottom=0.25)
+    # plt.show()
+    fig.savefig('grl2.pdf', bbox_inches='tight')
